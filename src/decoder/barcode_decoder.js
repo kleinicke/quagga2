@@ -401,6 +401,38 @@ export default {
             return result;
         }
 
+        /**
+         * Scans 24 evenly spaced horizontal and 24 vertical lines across the image, for when the
+         * locator finds no decodable box. A code is accepted only once two lines read it, since a
+         * single noisy line can misread. The result's box is the scan line (start, end, end, start).
+         * @returns {Object|null} the result {codeResult, line, box} or null
+         */
+        function decodeFromScanlines() {
+            const lines = 24;
+            const width = inputImageWrapper.size.x;
+            const height = inputImageWrapper.size.y;
+            const seen = new Set();
+            for (let k = 0; k < lines; k++) {
+                const y = (height * (k + 0.5)) / lines;
+                const x = (width * (k + 0.5)) / lines;
+                for (const line of [
+                    [{ x: 0, y }, { x: width - 1, y }],
+                    [{ x, y: 0 }, { x, y: height - 1 }],
+                ]) {
+                    const result = tryDecode(line);
+                    if (result) {
+                        const key = `${result.codeResult.format}:${result.codeResult.code}`;
+                        if (seen.has(key)) {
+                            const [start, end] = line.map((p) => [p.x, p.y]);
+                            return { codeResult: result.codeResult, line, box: [start, end, end, start] };
+                        }
+                        seen.add(key);
+                    }
+                }
+            }
+            return null;
+        }
+
         function getLineLength(line) {
             return Math.sqrt(
                 Math.pow(Math.abs(line[1].y - line[0].y), 2)
@@ -498,6 +530,9 @@ export default {
                 return {
                     barcodes,
                 };
+            },
+            decodeFromScanlines() {
+                return decodeFromScanlines();
             },
             async decodeFromImage(imageWrapperIn) {
                 const result = await decodeFromImage(imageWrapperIn);

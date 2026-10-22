@@ -230,13 +230,28 @@ export default class Quagga {
     }
 
     async locateAndDecode(): Promise<void> {
+        const { decoder } = this.context;
         const boxes = this.getBoundingBoxes();
         if (boxes) {
-            const decodeResult = (await this.context.decoder.decodeFromBoundingBoxes(boxes)) || {};
+            let decodeResult = (await decoder.decodeFromBoundingBoxes(boxes)) || {};
+            // With locate off, the single box is the configured area, so there is nothing to fall back to.
+            if (this.context.config?.locate && !this.hasCodeResult(decodeResult)) {
+                const fallback = decoder.decodeFromScanlines();
+                if (fallback && this.context.config.decoder?.multiple) {
+                    decodeResult = { barcodes: [...(decodeResult.barcodes ?? []), fallback] };
+                } else if (fallback) {
+                    decodeResult = fallback;
+                }
+            }
             decodeResult.boxes = boxes;
             this.publishResult(decodeResult, this.context.inputImageWrapper?.data);
         } else {
-            const imageResult = await this.context.decoder.decodeFromImage(this.context.inputImageWrapper);
+            // getBoundingBoxes only returns null when the locator ran and found nothing.
+            let imageResult = await decoder.decodeFromImage(this.context.inputImageWrapper);
+            if (!imageResult) {
+                const fallback = decoder.decodeFromScanlines();
+                imageResult = fallback && this.context.config?.decoder?.multiple ? { barcodes: [fallback] } : fallback;
+            }
             if (imageResult) {
                 this.publishResult(imageResult, this.context.inputImageWrapper?.data);
             } else {

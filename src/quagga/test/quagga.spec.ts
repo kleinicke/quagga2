@@ -6,6 +6,54 @@ import QuaggaStatic from '../../quagga';
 import type { Box } from '../transform';
 
 describe('src/quagga/quagga.ts', () => {
+    describe('locateAndDecode', () => {
+        const box = [[0, 0], [10, 0], [10, 10], [0, 10]];
+        const fallback = { codeResult: { code: '123', format: 'ean_13' }, line: [], box: [] };
+        let quagga: Quagga;
+        let published: any[];
+        let scanlineCalls: number;
+
+        function setup(config: any, boxes: any, boxResult: any) {
+            quagga = new Quagga();
+            published = [];
+            scanlineCalls = 0;
+            quagga.context.config = config;
+            quagga.context.decoder = {
+                decodeFromBoundingBoxes: async () => boxResult,
+                decodeFromImage: async () => null,
+                decodeFromScanlines: () => { scanlineCalls++; return fallback; },
+            } as any;
+            quagga.getBoundingBoxes = () => boxes;
+            quagga.publishResult = (result: any) => { published.push(result); };
+        }
+
+        it('should scan lines when the locator finds no box', async () => {
+            setup({ locate: true, decoder: {} }, null, null);
+            await quagga.locateAndDecode();
+            expect(published[0]).to.equal(fallback);
+        });
+
+        it('should scan lines when no located box decodes', async () => {
+            setup({ locate: true, decoder: { multiple: true } }, [box], { barcodes: [{ box }] });
+            await quagga.locateAndDecode();
+            expect(published[0].barcodes).to.deep.equal([{ box }, fallback]);
+            expect(published[0].boxes).to.deep.equal([box]);
+        });
+
+        it('should not scan lines when a box decodes', async () => {
+            setup({ locate: true, decoder: {} }, [box], { codeResult: { code: '456' }, box });
+            await quagga.locateAndDecode();
+            expect(scanlineCalls).to.equal(0);
+            expect(published[0].codeResult.code).to.equal('456');
+        });
+
+        it('should not scan lines when locate is off', async () => {
+            setup({ locate: false, decoder: {} }, [box], { barcodes: [] });
+            await quagga.locateAndDecode();
+            expect(scanlineCalls).to.equal(0);
+        });
+    });
+
     describe('transformResult', () => {
         let quagga: Quagga;
 
