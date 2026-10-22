@@ -313,12 +313,15 @@ export default {
          * Readers are tried in order (as specified in config.readers).
          * The first reader to return a non-null result wins.
          * @param {Array} line The scan line to decode
+         * @param {boolean} sampled Use Bresenham.getSampledLine instead of getBarcodeLine
          * @returns {Object|null} Decoded result or null if no reader succeeded
          */
-        function tryDecode(line) {
+        function tryDecode(line, sampled = false) {
             let result = null;
             let i;
-            const barcodeLine = Bresenham.getBarcodeLine(inputImageWrapper, line[0], line[1]);
+            const barcodeLine = sampled
+                ? Bresenham.getSampledLine(inputImageWrapper, line[0], line[1])
+                : Bresenham.getBarcodeLine(inputImageWrapper, line[0], line[1]);
 
             if (typeof ENV !== 'undefined' && ENV.development && config.debug.showFrequency) {
                 if (_canvas.ctx.overlay) {
@@ -401,6 +404,39 @@ export default {
             return result;
         }
 
+        /**
+         * Retries a box with getSampledLine on its center line and 14 parallel lines, at the
+         * brute-force spacing of 1/16 of the box side. A code is accepted only once two lines
+         * read it, since a single noisy line can misread.
+         * @param {Array} box The box being decoded
+         * @param {Array} line The extended center line
+         * @param {Number} lineAngle The angle of the line
+         * @returns {Object|null} the result of tryDecode, or null
+         */
+        function tryDecodeSampled(box, line, lineAngle) {
+            const sideLength = Math.sqrt(Math.pow(box[1][0] - box[0][0], 2) + Math.pow(box[1][1] - box[0][1], 2));
+            const step = sideLength / 16;
+            const seen = new Set();
+            // Offsets 0, +1, -1, +2, -2, ... +7, -7 steps from the center line.
+            for (let i = 0; i < 15; i++) {
+                const offset = step * Math.ceil(i / 2) * (i % 2 === 0 ? -1 : 1);
+                const dx = -Math.sin(lineAngle) * offset;
+                const dy = Math.cos(lineAngle) * offset;
+                const result = tryDecode([
+                    { x: line[0].x + dx, y: line[0].y + dy },
+                    { x: line[1].x + dx, y: line[1].y + dy },
+                ], true);
+                if (result) {
+                    const key = `${result.codeResult.format}:${result.codeResult.code}`;
+                    if (seen.has(key)) {
+                        return result;
+                    }
+                    seen.add(key);
+                }
+            }
+            return null;
+        }
+
         function getLineLength(line) {
             return Math.sqrt(
                 Math.pow(Math.abs(line[1].y - line[0].y), 2)
@@ -455,6 +491,10 @@ export default {
             result = tryDecode(line);
             if (result === null) {
                 result = tryDecodeBruteForce(box, line, lineAngle);
+            }
+            if (result === null) {
+                line = getExtendedLine(getLine(box), lineAngle, Math.floor(lineLength * 0.25));
+                result = tryDecodeSampled(box, line, lineAngle);
             }
 
             if (result === null) {

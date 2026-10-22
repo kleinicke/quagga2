@@ -85,6 +85,60 @@ Bresenham.getBarcodeLine = function (imageWrapper, p1, p2) {
 };
 
 /**
+ * Samples the image along the line from p1 to p2 at 1 px steps with bilinear interpolation,
+ * averaging three parallel lines 1 px apart. Points outside the image take the nearest edge pixel.
+ * @param {Object} imageWrapper
+ * @param {Object} p1 The start point {x,y}
+ * @param {Object} p2 The end point {x,y}
+ * @returns {line, min, max}
+ */
+Bresenham.getSampledLine = function (imageWrapper, p1, p2) {
+    const rows = 3;
+    const { data } = imageWrapper;
+    const width = imageWrapper.size.x;
+    const height = imageWrapper.size.y;
+    const length = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const dx = (p2.x - p1.x) / length;
+    const dy = (p2.y - p1.y) / length;
+    const line = [];
+    let min = 255;
+    let max = 0;
+
+    function sample(x, y) {
+        const cx = Math.min(Math.max(x, 0), width - 1);
+        const cy = Math.min(Math.max(y, 0), height - 1);
+        // Keep the right and lower neighbours inside the image.
+        const ix = Math.max(0, Math.min(Math.floor(cx), width - 2));
+        const iy = Math.max(0, Math.min(Math.floor(cy), height - 2));
+        const fx = cx - ix;
+        const fy = cy - iy;
+        const i = iy * width + ix;
+        const right = width > 1 ? 1 : 0;
+        const down = height > 1 ? width : 0;
+        return (data[i] * (1 - fx) + data[i + right] * fx) * (1 - fy)
+            + (data[i + down] * (1 - fx) + data[i + down + right] * fx) * fy;
+    }
+
+    for (let t = 0; t < length; t++) {
+        let sum = 0;
+        for (let r = 0; r < rows; r++) {
+            const offset = r - (rows - 1) / 2;
+            sum += sample(p1.x + dx * t - dy * offset, p1.y + dy * t + dx * offset);
+        }
+        const value = sum / rows;
+        line.push(value);
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+    }
+
+    return {
+        line,
+        min,
+        max,
+    };
+};
+
+/**
  * Converts the result from getBarcodeLine into a binary representation
  * also considering the frequency and slope of the signal for more robust results
  * @param {Object} result {line, min, max}
